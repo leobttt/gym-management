@@ -41,7 +41,7 @@ jobs:
           name: PowerGym-windows
           path: |
             dist/PowerGym.exe
-            dist_installer/PowerGym-Setup.exe
+            installer/dist_installer/PowerGym-Setup.exe
 
       - name: Upload release asset
         if: github.event_name == 'release'
@@ -49,4 +49,4 @@ jobs:
         with:
           files: |
             dist/PowerGym.exe
-            dist_installer/PowerGym-Setup.exe
+            installer/dist_installer/PowerGym-Setup.exe

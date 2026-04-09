@@ -339,73 +339,125 @@ class VentanaSocio(ctk.CTkToplevel):
         if self.ruta_foto and self.ruta_foto != self.ruta_foto_original:
             delete_photo_path(self.ruta_foto)
 
-    def toggle_cam(self):
-        import cv2
+    def _apagar_camara(self, restaurar_preview=True):
+        if self.vid is not None:
+            try:
+                self.vid.release()
+            except Exception:
+                pass
+            self.vid = None
+        if self.after_id is not None:
+            try:
+                self.after_cancel(self.after_id)
+            except Exception:
+                pass
+            self.after_id = None
+        self.btn_cam.configure(text="Prender Cámara")
+        self.btn_foto.configure(state="disabled")
+
+        if not restaurar_preview or self.ruta_foto:
+            return
+
         from PIL import Image
 
+        default_ico = ROOT_DIR / "icons" / "usuario.png"
+        if os.path.exists(default_ico):
+            img = Image.open(default_ico)
+            img.thumbnail((240, 180))
+            ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            self.lbl_video.configure(image=ctk_img, text="")
+            self.lbl_video.image = ctk_img
+        else:
+            self.lbl_video.configure(image=None, text="Cámara apagada")
+
+    def toggle_cam(self):
         if self.vid is None:
-            self.vid = cv2.VideoCapture(0)
-            self.btn_cam.configure(text=" Prender Cámara")
+            try:
+                import cv2
+            except Exception as exc:
+                mb.showerror("Cámara no disponible", f"No se pudo cargar OpenCV:\n{exc}")
+                return
+
+            try:
+                vid = cv2.VideoCapture(0)
+            except Exception as exc:
+                mb.showerror("Cámara no disponible", f"No se pudo iniciar la cámara:\n{exc}")
+                return
+
+            if not vid or not vid.isOpened():
+                try:
+                    if vid is not None:
+                        vid.release()
+                except Exception:
+                    pass
+                mb.showwarning("Cámara no disponible", "No se pudo abrir la cámara. Revisa permisos o si está siendo usada por otra app.")
+                return
+
+            self.vid = vid
+            self.btn_cam.configure(text="Apagar Cámara")
             self.btn_foto.configure(state="normal")
             self.update_frame()
             return
 
-        self.vid.release()
-        self.vid = None
-        if self.after_id is not None:
-            self.after_cancel(self.after_id)
-            self.after_id = None
-        self.btn_cam.configure(text="Prender Cámara")
-        self.btn_foto.configure(state="disabled")
-        if not self.ruta_foto:
-            default_ico = ROOT_DIR / "icons" / "usuario.png"
-            if os.path.exists(default_ico):
-                img = Image.open(default_ico)
-                img.thumbnail((240, 180))
-                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-                self.lbl_video.configure(image=ctk_img, text="")
-                self.lbl_video.image = ctk_img
-            else:
-                self.lbl_video.configure(image=None, text="Cámara apagada")
+        self._apagar_camara()
 
     def update_frame(self):
-        import cv2
-        from PIL import Image
+        try:
+            import cv2
+            from PIL import Image
+        except Exception:
+            self._apagar_camara()
+            return
 
         if self.vid is not None:
-            ret, frame = self.vid.read()
+            try:
+                ret, frame = self.vid.read()
+            except Exception:
+                self._apagar_camara()
+                mb.showwarning("Cámara detenida", "Hubo un problema al leer la cámara y se apagó automáticamente.")
+                return
             if ret:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(frame)
-                img.thumbnail((240, 180))
-                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-                self.lbl_video.configure(image=ctk_img, text="")
-                self.lbl_video.image = ctk_img
+                try:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(frame)
+                    img.thumbnail((240, 180))
+                    ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+                    self.lbl_video.configure(image=ctk_img, text="")
+                    self.lbl_video.image = ctk_img
+                except Exception:
+                    self._apagar_camara()
+                    mb.showwarning("Cámara detenida", "Hubo un problema mostrando la imagen de la cámara.")
+                    return
             self.after_id = self.after(15, self.update_frame)
 
     def tomar_foto(self):
-        import cv2
-        from PIL import Image
-        import uuid
+        try:
+            import cv2
+            from PIL import Image
+            import uuid
+        except Exception as exc:
+            mb.showerror("Foto no disponible", f"No se pudo preparar la captura:\n{exc}")
+            return
 
         if self.vid is None:
             return
-        ret, frame = self.vid.read()
+        try:
+            ret, frame = self.vid.read()
+        except Exception as exc:
+            self._apagar_camara()
+            mb.showerror("Foto no disponible", f"No se pudo leer la cámara:\n{exc}")
+            return
         if not ret:
+            self._apagar_camara()
+            mb.showwarning("Foto no disponible", "No se pudo capturar la imagen desde la cámara.")
             return
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame_rgb)
-        self.vid.release()
-        self.vid = None
-        if self.after_id is not None:
-            self.after_cancel(self.after_id)
-            self.after_id = None
-        self.btn_cam.configure(text=" Prender Cámara")
-        self.btn_foto.configure(state="disabled")
+        self._apagar_camara(restaurar_preview=False)
 
         self._descartar_foto_temporal_actual()
-        PHOTOS_DIR.mkdir(exist_ok=True)
+        PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
         filename = PHOTOS_DIR / f"socio_{uuid.uuid4().hex[:8]}.jpg"
         img.save(filename, "JPEG")
         self.ruta_foto = str(filename)

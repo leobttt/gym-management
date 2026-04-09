@@ -1,0 +1,2 @@
+"""Power Gym application package."""
+

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import customtkinter as ctk
-from PIL import Image, ImageDraw
+from PIL import Image
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ICONS_DIR = ROOT_DIR / "icons"
@@ -45,30 +45,6 @@ def cargar_ctk_icono(nombre, size=(20, 20)):
         return ctk.CTkImage(light_image=img, dark_image=img, size=size)
     except Exception:
         return None
-
-
-def _crear_icono_en_badge(img, size):
-    width, height = size
-    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(canvas)
-
-    radius = max(6, min(width, height) // 3)
-    draw.rounded_rectangle(
-        (0, 0, width - 1, height - 1),
-        radius=radius,
-        fill=(255, 255, 255, 255),
-    )
-
-    padding = max(2, min(width, height) // 8)
-    icon_box = (max(1, width - 2 * padding), max(1, height - 2 * padding))
-    icon = img.copy()
-    icon.thumbnail(icon_box, Image.Resampling.LANCZOS)
-    pos_x = (width - icon.width) // 2
-    pos_y = (height - icon.height) // 2
-    canvas.alpha_composite(icon, (pos_x, pos_y))
-    return canvas
-
-
 def cargar_iconos_globales():
     return {
         "dashboard": cargar_ctk_icono("dashboard.png", (18, 18)),
@@ -100,6 +76,8 @@ def cargar_iconos_globales():
         "eliminar": cargar_ctk_icono("basura.png", (24, 24)),
         "basura": cargar_ctk_icono("basura.png", (24, 24)),
         "camara": cargar_ctk_icono("camara.png", (24, 24)),
+        "exportar": cargar_ctk_icono("exportar.png", (24, 24)),
+        "reporte": cargar_ctk_icono("reporte.png", (24, 24)),
     }
 
 

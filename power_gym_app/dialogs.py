@@ -1,5 +1,7 @@
 import customtkinter as ctk
+import csv
 import os
+import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 
 from power_gym_app.receipts import PHOTOS_DIR, delete_photo_path, delete_receipt_file
@@ -9,11 +11,14 @@ from power_gym_app.theme import (
     GRIS_LIGHT,
     GRIS_MED,
     NEGRO,
+    PANEL_ALT,
     ROJO,
     ROJO_DARK,
     ROOT_DIR,
     TEXTO_GRIS,
     fmt_date,
+    font_body,
+    font_title,
 )
 from power_gym_app.validation import (
     construir_nombre,
@@ -24,6 +29,7 @@ from power_gym_app.validation import (
 )
 
 from database import (
+    actualizar_fecha_alta,
     actualizar_socio,
     actualizar_membresia,
     actualizar_gasto,
@@ -33,12 +39,18 @@ from database import (
     borrar_producto,
     borrar_venta,
     obtener_ventas,
+    obtener_corte_semanal,
+    obtener_reporte_mensual,
     registrar_gasto,
     registrar_venta,
+    agregar_categoria,
+    obtener_categorias,
+    requiere_reinscripcion,
 )
 from notificaciones import abrir_whatsapp
 
 ICONS = {}
+GASTO_CATEGORIAS = ["General", "Renta", "Servicios", "Nómina", "Mantenimiento", "Insumos", "Marketing", "Otros"]
 
 
 def _add_scroll_end_spacer(container, height=28):
@@ -459,9 +471,10 @@ class VentanaRenovar(ctk.CTkToplevel):
         super().__init__()  # type: ignore
         self.callback = callback
         self.socio = socio
+        self.reinscripcion_requerida = requiere_reinscripcion(socio[4])
 
-        self.title("Renovar Membresía")
-        self.geometry("380x540")
+        self.title("Reinscribir socio" if self.reinscripcion_requerida else "Renovar Membresía")
+        self.geometry("380x600" if self.reinscripcion_requerida else "380x540")
         self.resizable(False, False)
         self.configure(fg_color=NEGRO)
         self.grab_set()
@@ -469,11 +482,25 @@ class VentanaRenovar(ctk.CTkToplevel):
         header = ctk.CTkFrame(self, fg_color=ROJO, corner_radius=0, height=50)
         header.pack(fill="x")
         header.pack_propagate(False)
-        ctk.CTkLabel(header, text=f"RENOVAR A {socio[1].split()[0].upper()}", font=ctk.CTkFont(size=12, weight="bold"), text_color="#FFFFFF").pack(expand=True)
+        ctk.CTkLabel(
+            header,
+            text=f"{'REINSCRIBIR' if self.reinscripcion_requerida else 'RENOVAR'} A {socio[1].split()[0].upper()}",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#FFFFFF",
+        ).pack(expand=True)
         _add_header_close_button(header, self.destroy)
 
         form = ctk.CTkFrame(self, fg_color=NEGRO)
         form.pack(padx=30, pady=20, fill="both", expand=True)
+        if self.reinscripcion_requerida:
+            ctk.CTkLabel(
+                form,
+                text="La inscripción anterior ya cumplió un año. Este cobro se registrará como reinscripción.",
+                text_color=TEXTO_GRIS,
+                font=ctk.CTkFont(size=12),
+                wraplength=300,
+                justify="left",
+            ).pack(anchor="w", pady=(0, 12))
         ctk.CTkLabel(form, text="Tipo de membresía", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
         self.tipo_mem = ctk.CTkOptionMenu(form, values=["Mensual", "Bimestral", "Trimestral", "Semestral", "Anual"], fg_color=GRIS_MED, button_color=ROJO, button_hover_color=ROJO_DARK, text_color=BLANCO, corner_radius=8, height=38)
         self.tipo_mem.pack(fill="x", pady=(0, 10))
@@ -491,7 +518,17 @@ class VentanaRenovar(ctk.CTkToplevel):
         ctk.CTkLabel(form, text="Método de pago", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
         self.metodo_pago = ctk.CTkOptionMenu(form, values=["Efectivo", "Transferencia", "Tarjeta"], fg_color=GRIS_MED, button_color=ROJO, button_hover_color=ROJO_DARK, text_color=BLANCO, corner_radius=8, height=38)
         self.metodo_pago.pack(fill="x", pady=(0, 20))
-        ctk.CTkButton(form, text="GUARDAR RENOVACIÓN", height=50, corner_radius=8, fg_color=ROJO, text_color="#FFFFFF", hover_color=ROJO_DARK, font=ctk.CTkFont(size=16, weight="bold"), command=self.guardar).pack(fill="x", pady=(15, 20))
+        ctk.CTkButton(
+            form,
+            text="GUARDAR REINSCRIPCIÓN" if self.reinscripcion_requerida else "GUARDAR RENOVACIÓN",
+            height=50,
+            corner_radius=8,
+            fg_color=ROJO,
+            text_color="#FFFFFF",
+            hover_color=ROJO_DARK,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            command=self.guardar,
+        ).pack(fill="x", pady=(15, 20))
 
     def guardar(self):
         from datetime import timedelta
@@ -509,10 +546,13 @@ class VentanaRenovar(ctk.CTkToplevel):
         fecha_fin = fecha_inicio + timedelta(days=dias[self.tipo_mem.get()])
         metodo = self.metodo_pago.get()
         actualizar_membresia(self.socio[0], fecha_inicio.isoformat(), fecha_fin.isoformat(), self.tipo_mem.get())
-        registrar_pago(self.socio[0], monto, metodo, "Renovación")
+        concepto_pago = "Reinscripción" if self.reinscripcion_requerida else "Renovación"
+        if self.reinscripcion_requerida:
+            actualizar_fecha_alta(self.socio[0], fecha_inicio.isoformat())
+        registrar_pago(self.socio[0], monto, metodo, concepto_pago)
         VentanaRecibo(
             self,
-            generar_recibo_jpg(self.socio[1], monto, metodo, "Renovación de Membresía", None, self.socio[0], temporal=True),
+            generar_recibo_jpg(self.socio[1], monto, metodo, concepto_pago, None, self.socio[0], temporal=True),
             self.socio[2],
             auto_delete=True,
         )
@@ -659,8 +699,6 @@ class VentanaFinanzaForm(ctk.CTkToplevel):
         ctk.CTkLabel(
             header,
             text=f"{'EDITAR' if es_edicion else 'REGISTRAR'} {self.tipo.upper()}",
-            image=ICONS["lapiz"] if es_edicion else None,
-            compound="left",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#FFFFFF",
         ).pack(expand=True)
@@ -668,14 +706,34 @@ class VentanaFinanzaForm(ctk.CTkToplevel):
 
         form = ctk.CTkFrame(self, fg_color=NEGRO)
         form.pack(padx=30, pady=20, fill="both", expand=True)
+        self.categoria_var = None
         ctk.CTkLabel(form, text="Concepto/Descripción", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
         self.e_concepto = ctk.CTkEntry(form, height=38, corner_radius=8, fg_color=GRIS_MED, border_color=GRIS_LIGHT, text_color=BLANCO, font=ctk.CTkFont(size=13))
         self.e_concepto.pack(fill="x", pady=(0, 10))
+        if self.tipo == "Gasto":
+            ctk.CTkLabel(form, text="Categoría", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
+            categoria_default = registro[2] if registro is not None and len(registro) >= 5 else "General"
+            self.categoria_var = ctk.StringVar(value=categoria_default if categoria_default in GASTO_CATEGORIAS else "General")
+            self.e_categoria = ctk.CTkOptionMenu(
+                form,
+                values=GASTO_CATEGORIAS,
+                variable=self.categoria_var,
+                fg_color=GRIS_MED,
+                button_color=ROJO,
+                button_hover_color=ROJO_DARK,
+                text_color=BLANCO,
+                corner_radius=8,
+                height=38,
+            )
+            self.e_categoria.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(form, text="Monto ($)", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
         self.e_monto = ctk.CTkEntry(form, height=38, corner_radius=8, fg_color=GRIS_MED, border_color=GRIS_LIGHT, text_color=BLANCO, font=ctk.CTkFont(size=13))
         self.e_monto.pack(fill="x", pady=(0, 20))
         if registro is not None:
-            _, _, concepto, monto = registro
+            if self.tipo == "Gasto":
+                _, _, _, concepto, monto = registro
+            else:
+                _, _, concepto, monto = registro
             self.e_concepto.insert(0, concepto)
             self.e_monto.insert(0, f"{monto:.2f}")
         ctk.CTkButton(form, text="GUARDAR", height=50, corner_radius=8, fg_color=ROJO, text_color="#FFFFFF", hover_color=ROJO_DARK, font=ctk.CTkFont(size=16, weight="bold"), command=self.guardar).pack(fill="x", pady=(15, 20))
@@ -691,13 +749,48 @@ class VentanaFinanzaForm(ctk.CTkToplevel):
         except ValueError as exc:
             mb.showerror("Dato inválido", str(exc))
             return
+        categoria = self.categoria_var.get() if self.categoria_var is not None else "General"
 
         if self.tipo == "Gasto" and self.registro is not None:
-            actualizar_gasto(self.registro[0], concepto, monto)
+            actualizar_gasto(self.registro[0], concepto, monto, categoria)
         elif self.tipo == "Gasto":
-            registrar_gasto(concepto, monto)
+            registrar_gasto(concepto, monto, categoria)
         else:
             registrar_venta(concepto, monto)
+        self.callback()
+        self.destroy()
+
+class VentanaNuevaCategoria(ctk.CTkToplevel):
+    def __init__(self, parent, callback):
+        super().__init__()
+        self.callback = callback
+        self.title("Nueva Categoría")
+        self.geometry("380x280")
+        self.resizable(False, False)
+        self.configure(fg_color=NEGRO)
+        self.grab_set()
+
+        header = ctk.CTkFrame(self, fg_color=ROJO, corner_radius=0, height=56)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        ctk.CTkLabel(header, text="AGREGAR CATEGORÍA", font=ctk.CTkFont(size=12, weight="bold"), text_color="#FFFFFF").pack(expand=True)
+        _add_header_close_button(header, self.destroy)
+
+        form = ctk.CTkFrame(self, fg_color=NEGRO)
+        form.pack(padx=30, pady=20, fill="both", expand=True)
+        ctk.CTkLabel(form, text="Nombre de la categoría", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
+        self.e_nombre = ctk.CTkEntry(form, height=38, corner_radius=8, fg_color=GRIS_MED, border_color=GRIS_LIGHT, text_color=BLANCO, font=ctk.CTkFont(size=13))
+        self.e_nombre.pack(fill="x", pady=(0, 20))
+        
+        ctk.CTkButton(form, text="GUARDAR", height=50, corner_radius=8, fg_color=ROJO, text_color="#FFFFFF", hover_color=ROJO_DARK, font=ctk.CTkFont(size=16, weight="bold"), command=self.guardar).pack(fill="x", pady=(10, 20))
+
+    def guardar(self):
+        nombre = self.e_nombre.get().strip()
+        if not nombre:
+            mb.showerror("Datos incompletos", "El nombre es obligatorio.")
+            return
+            
+        agregar_categoria(nombre)
         self.callback()
         self.destroy()
 
@@ -707,7 +800,7 @@ class VentanaNuevoProducto(ctk.CTkToplevel):
         super().__init__()
         self.callback = callback
         self.title("Nuevo Producto")
-        self.geometry("380x380")
+        self.geometry("380x480")
         self.resizable(False, False)
         self.configure(fg_color=NEGRO)
         self.grab_set()
@@ -725,21 +818,42 @@ class VentanaNuevoProducto(ctk.CTkToplevel):
         self.e_nombre.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(form, text="Costo ($)", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
         self.e_costo = ctk.CTkEntry(form, height=38, corner_radius=8, fg_color=GRIS_MED, border_color=GRIS_LIGHT, text_color=BLANCO, font=ctk.CTkFont(size=13))
-        self.e_costo.pack(fill="x", pady=(0, 20))
+        self.e_costo.pack(fill="x", pady=(0, 10))
+        
+        ctk.CTkLabel(form, text="Categoría", text_color=TEXTO_GRIS, font=ctk.CTkFont(size=12), anchor="w").pack(anchor="w", pady=(10, 2))
+        
+        cats = obtener_categorias()
+        self.mapa_categorias = {c[1]: c[0] for c in cats}
+        nombres_cats = list(self.mapa_categorias.keys())
+        
+        if not nombres_cats:
+            self.e_categoria = ctk.CTkOptionMenu(form, values=["Sin categoría"], state="disabled", fg_color=GRIS_MED, button_color=ROJO, button_hover_color=ROJO_DARK, text_color=BLANCO, corner_radius=8, height=38)
+        else:
+            self.e_categoria = ctk.CTkOptionMenu(form, values=nombres_cats, fg_color=GRIS_MED, button_color=ROJO, button_hover_color=ROJO_DARK, text_color=BLANCO, corner_radius=8, height=38)
+        self.e_categoria.pack(fill="x", pady=(0, 20))
+        
         ctk.CTkButton(form, text="GUARDAR", height=50, corner_radius=8, fg_color=ROJO, text_color="#FFFFFF", hover_color=ROJO_DARK, font=ctk.CTkFont(size=16, weight="bold"), command=self.guardar).pack(fill="x", pady=(15, 20))
 
     def guardar(self):
         nombre = self.e_nombre.get().strip()
         costo_str = self.e_costo.get().strip()
+        cat_seleccionada = self.e_categoria.get()
+        
         if not nombre or not costo_str:
             mb.showerror("Datos incompletos", "Nombre y costo son obligatorios.")
+            return
+            
+        if cat_seleccionada == "Sin categoría" or cat_seleccionada not in self.mapa_categorias:
+            mb.showerror("Categoría Faltante", "Debe crear una categoría antes de añadir productos.")
             return
         try:
             costo = parse_monto(costo_str, "Costo", required=True)
         except ValueError as exc:
             mb.showerror("Dato inválido", str(exc))
             return
-        agregar_producto(nombre, costo)
+            
+        cat_id = self.mapa_categorias[cat_seleccionada]
+        agregar_producto(nombre, costo, cat_id)
         self.callback()
         self.destroy()
 
@@ -758,6 +872,19 @@ class VentanaHistorialVentas(ctk.CTkToplevel):
         header.pack_propagate(False)
         ctk.CTkLabel(header, text="HISTORIAL DE VENTAS", font=ctk.CTkFont(size=12, weight="bold"), text_color="#FFFFFF").pack(expand=True)
         _add_header_close_button(header, self.destroy)
+
+        top_frame = ctk.CTkFrame(self, fg_color="transparent")
+        top_frame.pack(fill="x", padx=20, pady=(10, 0))
+        ctk.CTkButton(
+            top_frame,
+            text="Limpiar historial",
+            image=ICONS["basura"],
+            fg_color="#000000",
+            hover_color="#222222",
+            text_color="#FFFFFF",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self.limpiar_todo,
+        ).pack(side="right")
 
         self.tabla = ctk.CTkScrollableFrame(self, fg_color=GRIS_DARK, scrollbar_button_color=GRIS_DARK, scrollbar_button_hover_color=GRIS_DARK)
         self.tabla.pack(fill="both", expand=True, padx=20, pady=20)
@@ -796,6 +923,235 @@ class VentanaHistorialVentas(ctk.CTkToplevel):
         if mb.askyesno("Confirmar", "¿Estás seguro de eliminar TODAS las ventas registradas del historial?"):
             borrar_todas_ventas()
             self.cargar()
+
+
+class VentanaCorteSemanal(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__()
+        self.title("Corte de Caja Semanal")
+        self.geometry("520x520")
+        self.resizable(False, False)
+        self.configure(fg_color=NEGRO)
+        self.grab_set()
+        self.resumen = obtener_corte_semanal()
+
+        header = ctk.CTkFrame(self, fg_color=ROJO, corner_radius=0, height=56)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        ctk.CTkLabel(header, text="CORTE DE CAJA SEMANAL", font=ctk.CTkFont(size=12, weight="bold"), text_color="#FFFFFF").pack(expand=True)
+        _add_header_close_button(header, self.destroy)
+
+        body = ctk.CTkFrame(self, fg_color=NEGRO)
+        body.pack(fill="both", expand=True, padx=20, pady=18)
+
+        periodo = ctk.CTkFrame(body, fg_color=GRIS_DARK, corner_radius=16)
+        periodo.pack(fill="x")
+        ctk.CTkLabel(periodo, text="Periodo analizado", font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXTO_GRIS).pack(anchor="w", padx=18, pady=(16, 4))
+        ctk.CTkLabel(
+            periodo,
+            text=f"{fmt_date(self.resumen['fecha_inicio'])} al {fmt_date(self.resumen['fecha_fin'])}",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=BLANCO,
+        ).pack(anchor="w", padx=18, pady=(0, 16))
+
+        resumen_frame = ctk.CTkFrame(body, fg_color="transparent")
+        resumen_frame.pack(fill="both", expand=True, pady=(14, 0))
+        for titulo, monto, extra, color in [
+            ("Ingresos socios", self.resumen["ingresos_socios"], f"{self.resumen['pagos_count']} cobro(s)", BLANCO),
+            ("Ventas productos", self.resumen["ventas_productos"], f"{self.resumen['ventas_count']} venta(s)", BLANCO),
+            ("Gastos", self.resumen["gastos"], f"{self.resumen['gastos_count']} registro(s)", ROJO),
+            ("Neto semanal", self.resumen["neto"], "Ingresos + ventas - gastos", "#2ecc71" if self.resumen["neto"] >= 0 else ROJO),
+        ]:
+            card = ctk.CTkFrame(resumen_frame, fg_color=GRIS_DARK, corner_radius=16, border_width=1, border_color=GRIS_LIGHT)
+            card.pack(fill="x", pady=6)
+            ctk.CTkLabel(card, text=titulo, font=ctk.CTkFont(size=12, weight="bold"), text_color=TEXTO_GRIS).pack(anchor="w", padx=16, pady=(14, 4))
+            ctk.CTkLabel(card, text=f"${monto:,.2f}", font=ctk.CTkFont(size=24, weight="bold"), text_color=color).pack(anchor="w", padx=16)
+            ctk.CTkLabel(card, text=extra, font=ctk.CTkFont(size=12), text_color=TEXTO_GRIS).pack(anchor="w", padx=16, pady=(0, 14))
+
+        ctk.CTkButton(
+            body,
+            text="Exportar corte semanal",
+            image=ICONS["exportar"],
+            height=42,
+            corner_radius=10,
+            fg_color=ROJO,
+            hover_color=ROJO_DARK,
+            text_color=BLANCO,
+            command=self.exportar_csv,
+        ).pack(fill="x", pady=(12, 0))
+
+    def exportar_csv(self):
+        ruta = fd.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("Archivos CSV", "*.csv")],
+            title="Guardar corte semanal",
+        )
+        if not ruta:
+            return
+        try:
+            with open(ruta, "w", newline="", encoding="utf-8") as file:
+                writer = csv.writer(file)
+                writer.writerow(["Concepto", "Valor"])
+                writer.writerow(["Fecha inicio", self.resumen["fecha_inicio"]])
+                writer.writerow(["Fecha fin", self.resumen["fecha_fin"]])
+                writer.writerow(["Ingresos socios", f"{self.resumen['ingresos_socios']:.2f}"])
+                writer.writerow(["Cobros socios", self.resumen["pagos_count"]])
+                writer.writerow(["Ventas productos", f"{self.resumen['ventas_productos']:.2f}"])
+                writer.writerow(["Ventas registradas", self.resumen["ventas_count"]])
+                writer.writerow(["Gastos", f"{self.resumen['gastos']:.2f}"])
+                writer.writerow(["Gastos registrados", self.resumen["gastos_count"]])
+                writer.writerow(["Neto semanal", f"{self.resumen['neto']:.2f}"])
+            mb.showinfo("Exportación lista", "El corte semanal se exportó correctamente.")
+        except OSError as exc:
+            mb.showerror("Error", f"No se pudo exportar el corte semanal:\n{exc}")
+
+
+class VentanaReporteMensual(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__()
+        self.title("Reporte Mensual")
+        self.geometry("720x680")
+        self.resizable(False, False)
+        self.configure(fg_color=NEGRO)
+        self.grab_set()
+        self.reporte = obtener_reporte_mensual()
+
+        header = ctk.CTkFrame(self, fg_color=ROJO, corner_radius=0, height=56)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        ctk.CTkLabel(header, text="REPORTE MENSUAL", font=ctk.CTkFont(size=12, weight="bold"), text_color="#FFFFFF").pack(expand=True)
+        _add_header_close_button(header, self.destroy)
+
+        top = ctk.CTkFrame(self, fg_color=NEGRO)
+        top.pack(fill="x", padx=20, pady=(14, 8))
+        ctk.CTkLabel(top, text=self.reporte["mes_label"], font=ctk.CTkFont(size=24, weight="bold"), text_color=BLANCO).pack(side="left")
+        ctk.CTkButton(top, text="Exportar reporte", image=ICONS["exportar"], height=40, fg_color=ROJO, hover_color=ROJO_DARK, text_color=BLANCO, command=self.exportar_csv).pack(side="right")
+
+        info = ctk.CTkLabel(
+            self,
+            text="Este resumen agrupa la operación del mes para evitar depender de historiales largos en pantalla.",
+            text_color=TEXTO_GRIS,
+            font=ctk.CTkFont(size=12),
+        )
+        info.pack(anchor="w", padx=20)
+
+        scroll = ctk.CTkScrollableFrame(self, fg_color=NEGRO, scrollbar_button_color=NEGRO, scrollbar_button_hover_color=NEGRO)
+        scroll.pack(fill="both", expand=True, padx=20, pady=12)
+
+        self._section_ingresos(scroll)
+        self._section_productos(scroll)
+        self._section_gastos(scroll)
+        self._section_socios(scroll)
+        _add_scroll_end_spacer(scroll)
+
+    def _section_card(self, parent, title):
+        card = ctk.CTkFrame(parent, fg_color=GRIS_DARK, corner_radius=18, border_width=1, border_color=GRIS_LIGHT)
+        card.pack(fill="x", pady=8)
+        ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=18, weight="bold"), text_color=BLANCO).pack(anchor="w", padx=16, pady=(14, 10))
+        return card
+
+    def _section_ingresos(self, parent):
+        card = self._section_card(parent, "Ingresos por membresías")
+        ingresos = self.reporte["ingresos_membresias"]
+        for label, data in [
+            ("Inscripciones", ingresos["inscripciones"]),
+            ("Renovaciones", ingresos["renovaciones"]),
+        ]:
+            fila = ctk.CTkFrame(card, fg_color="transparent")
+            fila.pack(fill="x", padx=16, pady=3)
+            ctk.CTkLabel(fila, text=label, font=ctk.CTkFont(size=13), text_color=BLANCO).pack(side="left")
+            ctk.CTkLabel(fila, text=f"{data['cantidad']} movimiento(s)", font=ctk.CTkFont(size=12), text_color=TEXTO_GRIS).pack(side="left", padx=10)
+            ctk.CTkLabel(fila, text=f"${data['monto']:,.2f}", font=ctk.CTkFont(size=13, weight="bold"), text_color=BLANCO).pack(side="right")
+        total = ctk.CTkFrame(card, fg_color=PANEL_ALT, corner_radius=12)
+        total.pack(fill="x", padx=16, pady=(10, 14))
+        ctk.CTkLabel(total, text="Total membresías", font=ctk.CTkFont(size=13, weight="bold"), text_color=BLANCO).pack(side="left", padx=14, pady=12)
+        ctk.CTkLabel(total, text=f"${ingresos['total']:,.2f}", font=ctk.CTkFont(size=16, weight="bold"), text_color="#2ecc71").pack(side="right", padx=14, pady=12)
+
+    def _section_productos(self, parent):
+        card = self._section_card(parent, "Productos más vendidos")
+        total_ventas = self.reporte["ventas_productos_total"]
+        ctk.CTkLabel(card, text=f"Ingreso total por productos: ${total_ventas:,.2f}", font=ctk.CTkFont(size=13, weight="bold"), text_color="#2ecc71").pack(anchor="w", padx=16, pady=(0, 10))
+        productos = self.reporte["productos_mas_vendidos"]
+        if not productos:
+            ctk.CTkLabel(card, text="No hay productos desglosados para este mes.", text_color=TEXTO_GRIS).pack(anchor="w", padx=16, pady=(0, 14))
+            return
+        for item in productos:
+            fila = ctk.CTkFrame(card, fg_color="transparent")
+            fila.pack(fill="x", padx=16, pady=3)
+            ctk.CTkLabel(fila, text=item["producto"], font=ctk.CTkFont(size=13), text_color=BLANCO).pack(side="left")
+            ctk.CTkLabel(fila, text=f"{item['cantidad']} pza(s)", font=ctk.CTkFont(size=12), text_color=TEXTO_GRIS).pack(side="left", padx=10)
+            ctk.CTkLabel(fila, text=f"${item['ingresos']:,.2f}", font=ctk.CTkFont(size=13, weight="bold"), text_color=BLANCO).pack(side="right")
+
+    def _section_gastos(self, parent):
+        card = self._section_card(parent, "Gastos por categoría")
+        gastos = self.reporte["gastos_por_categoria"]
+        if not gastos:
+            ctk.CTkLabel(card, text="No hay gastos registrados este mes.", text_color=TEXTO_GRIS).pack(anchor="w", padx=16, pady=(0, 14))
+            return
+        for item in gastos:
+            fila = ctk.CTkFrame(card, fg_color="transparent")
+            fila.pack(fill="x", padx=16, pady=3)
+            ctk.CTkLabel(fila, text=item["categoria"], font=ctk.CTkFont(size=13), text_color=BLANCO).pack(side="left")
+            ctk.CTkLabel(fila, text=f"{item['cantidad']} gasto(s)", font=ctk.CTkFont(size=12), text_color=TEXTO_GRIS).pack(side="left", padx=10)
+            ctk.CTkLabel(fila, text=f"${item['monto']:,.2f}", font=ctk.CTkFont(size=13, weight="bold"), text_color=ROJO).pack(side="right")
+        total = ctk.CTkFrame(card, fg_color=PANEL_ALT, corner_radius=12)
+        total.pack(fill="x", padx=16, pady=(10, 14))
+        ctk.CTkLabel(total, text="Total gastos", font=ctk.CTkFont(size=13, weight="bold"), text_color=BLANCO).pack(side="left", padx=14, pady=12)
+        ctk.CTkLabel(total, text=f"${self.reporte['gastos_total']:,.2f}", font=ctk.CTkFont(size=16, weight="bold"), text_color=ROJO).pack(side="right", padx=14, pady=12)
+
+    def _section_socios(self, parent):
+        card = self._section_card(parent, "Actividad de socios")
+        items = [
+            ("Socios nuevos", self.reporte["socios_nuevos"]),
+            ("Renovaciones", self.reporte["ingresos_membresias"]["renovaciones"]["cantidad"]),
+        ]
+        for label, value in items:
+            fila = ctk.CTkFrame(card, fg_color="transparent")
+            fila.pack(fill="x", padx=16, pady=4)
+            ctk.CTkLabel(fila, text=label, font=ctk.CTkFont(size=13), text_color=BLANCO).pack(side="left")
+            ctk.CTkLabel(fila, text=str(value), font=ctk.CTkFont(size=13, weight="bold"), text_color=BLANCO).pack(side="right")
+
+    def exportar_csv(self):
+        ruta = fd.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("Archivos CSV", "*.csv")],
+            title="Guardar reporte mensual",
+        )
+        if not ruta:
+            return
+        try:
+            with open(ruta, "w", newline="", encoding="utf-8") as file:
+                writer = csv.writer(file)
+                writer.writerow(["Sección", "Elemento", "Cantidad", "Monto"])
+                writer.writerow(["General", "Periodo", self.reporte["periodo"], ""])
+                writer.writerow(["General", "Socios nuevos", self.reporte["socios_nuevos"], ""])
+                writer.writerow([
+                    "Membresías",
+                    "Inscripciones",
+                    self.reporte["ingresos_membresias"]["inscripciones"]["cantidad"],
+                    f"{self.reporte['ingresos_membresias']['inscripciones']['monto']:.2f}",
+                ])
+                writer.writerow([
+                    "Membresías",
+                    "Renovaciones",
+                    self.reporte["ingresos_membresias"]["renovaciones"]["cantidad"],
+                    f"{self.reporte['ingresos_membresias']['renovaciones']['monto']:.2f}",
+                ])
+                writer.writerow([
+                    "Membresías",
+                    "Total",
+                    "",
+                    f"{self.reporte['ingresos_membresias']['total']:.2f}",
+                ])
+                for item in self.reporte["productos_mas_vendidos"]:
+                    writer.writerow(["Productos", item["producto"], item["cantidad"], f"{item['ingresos']:.2f}"])
+                writer.writerow(["Productos", "Total ventas productos", "", f"{self.reporte['ventas_productos_total']:.2f}"])
+                for item in self.reporte["gastos_por_categoria"]:
+                    writer.writerow(["Gastos", item["categoria"], item["cantidad"], f"{item['monto']:.2f}"])
+                writer.writerow(["Gastos", "Total gastos", "", f"{self.reporte['gastos_total']:.2f}"])
+            mb.showinfo("Exportación lista", "El reporte mensual se exportó correctamente.")
+        except OSError as exc:
+            mb.showerror("Error", f"No se pudo exportar el reporte mensual:\n{exc}")
 
 
 class VentanaRecibo(ctk.CTkToplevel):

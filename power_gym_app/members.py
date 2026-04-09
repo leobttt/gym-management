@@ -5,7 +5,7 @@ import customtkinter as ctk
 import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 
-from database import borrar_socio, obtener_socios
+from database import borrar_socio, obtener_socios, requiere_reinscripcion
 from power_gym_app.dialogs import VentanaHistorial, VentanaPerfil, VentanaRenovar, VentanaSocio
 from power_gym_app.theme import (
     AMBAR,
@@ -66,7 +66,7 @@ class SociosMixin:
             font=font_body(13, "bold"),
         )
         self.opciones_estado.pack(side="left", padx=(10, 0))
-        ctk.CTkButton(search_frame, text="Exportar CSV", height=42, fg_color=GRIS_MED, hover_color=GRIS_LIGHT, text_color=BLANCO, corner_radius=14, font=font_body(13, "bold"), command=self.exportar_csv).pack(side="right", padx=(10, 0))
+        ctk.CTkButton(search_frame, text="Exportar CSV", image=self.icons["exportar"], height=42, fg_color=GRIS_MED, hover_color=GRIS_LIGHT, text_color=BLANCO, corner_radius=14, font=font_body(13, "bold"), command=self.exportar_csv).pack(side="right", padx=(10, 0))
         self.tabla = ctk.CTkScrollableFrame(page, fg_color=NEGRO, scrollbar_button_color=NEGRO, scrollbar_button_hover_color=NEGRO)
         self.tabla.pack(fill="both", expand=True, padx=16, pady=12)
         self.cargar_socios()
@@ -102,7 +102,9 @@ class SociosMixin:
             if fecha_fin:
                 try:
                     diff = (date.fromisoformat(fecha_fin) - hoy).days
-                    if diff < 0:
+                    if diff < 0 and requiere_reinscripcion(alta, hoy):
+                        estado_txt = "Reinscripción requerida"
+                    elif diff < 0:
                         estado_txt = "Vencido ❌"
                     elif 0 <= diff <= 5:
                         estado_txt = "Por vencer ⚠️"
@@ -116,7 +118,7 @@ class SociosMixin:
                     continue
                 if selected == "Por Vencer" and estado_txt != "Por vencer ⚠️":
                     continue
-                if selected == "Vencidos" and estado_txt != "Vencido ❌":
+                if selected == "Vencidos" and estado_txt not in {"Vencido ❌", "Reinscripción requerida"}:
                     continue
             if filtro and filtro not in f"{nombre} {telefono} {tipo} {estado_txt}".lower():
                 continue
@@ -139,7 +141,14 @@ class SociosMixin:
             avatar.pack(side="left", padx=(6, 10))
             avatar.pack_propagate(False)
             iniciales = "".join([w[0].upper() for w in nombre_completo.split()[:2]]) if nombre_completo else "?"
-            ctk.CTkLabel(avatar, text=iniciales, font=font_body(13, "bold"), text_color=ROJO).pack(expand=True)
+            ctk.CTkLabel(
+                avatar,
+                text=iniciales,
+                font=font_body(13, "bold"),
+                text_color=ROJO,
+                anchor="center",
+                justify="center",
+            ).place(relx=0.5, rely=0.5, anchor="center")
             text_info = ctk.CTkFrame(persona, fg_color="transparent")
             text_info.pack(side="left", fill="x", expand=True)
             ctk.CTkLabel(text_info, text=nombre_completo, anchor="w", text_color=BLANCO, font=font_body(13, "bold")).pack(anchor="w")
@@ -179,6 +188,8 @@ class SociosMixin:
 
     def _estado_color(self, estado_txt):
         if "Vencido" in estado_txt:
+            return ROJO
+        if "Reinscripción" in estado_txt:
             return ROJO
         if "Por vencer" in estado_txt:
             return AMBAR

@@ -1,7 +1,7 @@
 import customtkinter as ctk
 
 import power_gym_app.dialogs as dialogs
-from database import socios_por_vencer
+from database import obtener_alertas_sistema_pendientes, socios_por_vencer
 from power_gym_app.alerts import AlertasMixin
 from power_gym_app.dashboard import DashboardMixin
 from power_gym_app.members import SociosMixin
@@ -71,7 +71,6 @@ class App(AlertasMixin, DashboardMixin, SociosMixin, VentasMixin, ctk.CTk):
         brand.pack_propagate(False)
         ctk.CTkLabel(brand, text="POWER", font=font_title(30), text_color=BLANCO).pack(anchor="w", padx=24, pady=(24, 0))
         ctk.CTkLabel(brand, text="GYM", font=font_title(44), text_color=ROJO).pack(anchor="w", padx=24)
-        ctk.CTkLabel(brand, text="Premium fitness management", font=font_body(12), text_color=TEXTO_GRIS).pack(anchor="w", padx=24, pady=(0, 12))
 
         footer_wrap = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         footer_wrap.pack(side="bottom", fill="x", padx=18, pady=(0, 18))
@@ -92,6 +91,11 @@ class App(AlertasMixin, DashboardMixin, SociosMixin, VentasMixin, ctk.CTk):
         self._sidebar_item(nav, "ventas", "Ventas productos", self.mostrar_ventas, icon=self.icons.get("ventas_small"))
         self._sidebar_item(nav, "gastos", "Gastos", self.mostrar_gastos, icon=self.icons.get("gastos_small"))
 
+        self._sidebar_separator(nav)
+        self._sidebar_section(nav, "FINANZAS")
+        self._sidebar_item(nav, "corte_semanal", "Corte semanal", self.mostrar_corte_semanal, icon=self.icons.get("dolar"))
+        self._sidebar_item(nav, "reporte_mensual", "Reporte mensual", self.mostrar_reporte_mensual, icon=self.icons.get("reporte"))
+
         footer = ctk.CTkFrame(footer_wrap, fg_color=PANEL_ALT, corner_radius=16, border_width=0, border_color=BORDER_SOFT, height=76)
         footer.pack(fill="x")
         footer.pack_propagate(False)
@@ -102,6 +106,12 @@ class App(AlertasMixin, DashboardMixin, SociosMixin, VentasMixin, ctk.CTk):
         footer_text.pack(side="left", fill="x", expand=True, pady=12)
         ctk.CTkLabel(footer_text, text="Power Gym", font=font_body(13, "bold"), text_color=BLANCO).pack(anchor="w")
         ctk.CTkLabel(footer_text, text="Administración", font=font_body(11), text_color=TEXTO_GRIS).pack(anchor="w")
+        ctk.CTkLabel(
+            footer_wrap,
+            text="version 1.0",
+            font=font_body(11),
+            text_color=TEXTO_GRIS,
+        ).pack(anchor="center", pady=(10, 0))
 
     def _sidebar_section(self, parent, text):
         ctk.CTkFrame(parent, fg_color=BORDER_SOFT, height=1).pack(fill="x", pady=(2, 10))
@@ -165,7 +175,7 @@ class App(AlertasMixin, DashboardMixin, SociosMixin, VentasMixin, ctk.CTk):
 
     def _notificaciones_pendientes(self):
         try:
-            return len(socios_por_vencer(dias=7, unnotified_only=True))
+            return len(socios_por_vencer(dias=7, unnotified_only=True)) + len(obtener_alertas_sistema_pendientes())
         except Exception:
             return 0
 
@@ -225,11 +235,6 @@ class App(AlertasMixin, DashboardMixin, SociosMixin, VentasMixin, ctk.CTk):
         self.topbar_container = topbar
         self.content_container = content
         return content
-
-    def _update_sidebar_badge(self, key, value):
-        badge = self.sidebar_badges.get(key)
-        if badge is not None and badge.winfo_exists():
-            badge.configure(text=str(value))
 
     def actualizar_badges_sidebar(self):
         return

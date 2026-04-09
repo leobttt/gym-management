@@ -9,6 +9,7 @@ Una aplicación de escritorio moderna diseñada para la gestión integral de gim
 - **Punto de Venta:** Gestión de ventas de productos y servicios.
 - **Finanzas:** Registro de gastos y cálculo de ingresos netos.
 - **Notificaciones:** Sistema de alertas para membresías próximas a vencer.
+- - **Notificaciones:** Sistema de notificación al usuario mediante whatsapp.
 
 ## Tecnologías
 

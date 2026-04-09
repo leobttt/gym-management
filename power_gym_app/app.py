@@ -1,7 +1,9 @@
 import customtkinter as ctk
+from pathlib import Path
 
 import power_gym_app.dialogs as dialogs
 from database import obtener_alertas_sistema_pendientes, socios_por_vencer
+from power_gym_app.paths import get_resource_root
 from power_gym_app.alerts import AlertasMixin
 from power_gym_app.dashboard import DashboardMixin
 from power_gym_app.members import SociosMixin
@@ -49,6 +51,16 @@ class App(AlertasMixin, DashboardMixin, SociosMixin, VentasMixin, ctk.CTk):
         self._build_main()
         self.after(600, self.revisar_vencimientos)
         self.cargar_socios()
+        self._apply_window_icon()
+
+    def _apply_window_icon(self):
+        icon_path = Path(get_resource_root()) / "installer" / "powergym.ico"
+        if not icon_path.exists():
+            return
+        try:
+            self.iconbitmap(str(icon_path))
+        except Exception:
+            pass
 
     def _maximizar_ventana(self):
         try:

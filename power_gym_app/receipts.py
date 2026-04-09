@@ -1,14 +1,26 @@
 from pathlib import Path
 import hashlib
+from power_gym_app.paths import get_data_root, get_resource_root
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-RECEIPTS_DIR = ROOT_DIR / "recibos_socios"
-PHOTOS_DIR = ROOT_DIR / "fotos_socios"
+ROOT_DIR = get_resource_root()
+DATA_DIR = get_data_root()
+RECEIPTS_DIR = DATA_DIR / "recibos_socios"
+PHOTOS_DIR = DATA_DIR / "fotos_socios"
+
+
+def ensure_receipts_dir():
+    RECEIPTS_DIR.parent.mkdir(parents=True, exist_ok=True)
+    RECEIPTS_DIR.mkdir(exist_ok=True)
+
+
+def ensure_photos_dir():
+    PHOTOS_DIR.parent.mkdir(parents=True, exist_ok=True)
+    PHOTOS_DIR.mkdir(exist_ok=True)
 
 
 def ensure_asset_dirs():
-    RECEIPTS_DIR.mkdir(exist_ok=True)
-    PHOTOS_DIR.mkdir(exist_ok=True)
+    ensure_receipts_dir()
+    ensure_photos_dir()
 
 
 def _fecha_para_hash(fecha):
@@ -25,7 +37,7 @@ def _fecha_para_hash(fecha):
 
 
 def build_receipt_path(socio_id, monto, concepto, fecha):
-    ensure_asset_dirs()
+    ensure_receipts_dir()
     fecha_str = _fecha_para_hash(fecha)
     hash_date = fecha_str[:10]
     unique_id = hashlib.md5(
@@ -41,7 +53,7 @@ def delete_receipt_file(socio_id, monto, concepto, fecha):
 
 
 def delete_member_receipts(socio_id):
-    ensure_asset_dirs()
+    ensure_receipts_dir()
     for path in RECEIPTS_DIR.glob(f"recibo_socio{socio_id}_*.jpg"):
         path.unlink(missing_ok=True)
 
@@ -49,7 +61,7 @@ def delete_member_receipts(socio_id):
 def delete_member_photo(photo_path, socio_id):
     if photo_path:
         delete_photo_path(photo_path)
-    ensure_asset_dirs()
+    ensure_photos_dir()
     for path in PHOTOS_DIR.glob(f"socio_{socio_id}_*.jpg"):
         path.unlink(missing_ok=True)
 
@@ -59,5 +71,5 @@ def delete_photo_path(photo_path):
         return
     path = Path(photo_path)
     if not path.is_absolute():
-        path = ROOT_DIR / path
+        path = PHOTOS_DIR.parent / path
     path.unlink(missing_ok=True)

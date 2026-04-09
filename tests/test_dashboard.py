@@ -1,6 +1,15 @@
+import importlib
+import sys
+import types
 import unittest
 
-from power_gym_app.dashboard import productos_recientes_desde_ventas
+fake_ctk = types.ModuleType("customtkinter")
+fake_ctk.set_appearance_mode = lambda *_args, **_kwargs: None
+fake_ctk.set_default_color_theme = lambda *_args, **_kwargs: None
+fake_ctk.CTkFont = lambda *args, **kwargs: (args, kwargs)
+sys.modules.setdefault("customtkinter", fake_ctk)
+
+productos_recientes_desde_ventas = importlib.import_module("power_gym_app.dashboard").productos_recientes_desde_ventas
 
 
 class DashboardTests(unittest.TestCase):

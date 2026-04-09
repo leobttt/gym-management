@@ -3,18 +3,21 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
+from power_gym_app.paths import get_data_root
 from power_gym_app.receipts import delete_member_photo, delete_member_receipts, delete_photo_path, delete_receipt_file
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = get_data_root()
 DB_PATH = BASE_DIR / "socios.db"
 FINANZAS_DB_PATH = BASE_DIR / "finanzas.db"
 
 def conectar_socios():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.execute("PRAGMA foreign_keys = ON")
     return con
 
 def conectar_finanzas():
+    FINANZAS_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(FINANZAS_DB_PATH)
 
 
@@ -45,10 +48,108 @@ def _month_bounds(periodo=None):
     return inicio, periodo_str
 
 
+def _hay_datos_corte_semanal(hoy=None):
+    inicio, fin = _week_bounds(hoy)
+    inicio_iso = inicio.isoformat()
+    fin_iso = fin.isoformat()
+
+    con = conectar_socios()
+    cur = con.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM pagos
+        WHERE fecha BETWEEN ? AND ?
+    """,
+        (inicio_iso, fin_iso),
+    )
+    pagos_count = cur.fetchone()[0] or 0
+    con.close()
+
+    con_f = conectar_finanzas()
+    cur_f = con_f.cursor()
+    cur_f.execute(
+        """
+        SELECT COUNT(*)
+        FROM ventas_productos
+        WHERE fecha BETWEEN ? AND ?
+    """,
+        (inicio_iso, fin_iso),
+    )
+    ventas_count = cur_f.fetchone()[0] or 0
+    cur_f.execute(
+        """
+        SELECT COUNT(*)
+        FROM gastos
+        WHERE fecha BETWEEN ? AND ?
+    """,
+        (inicio_iso, fin_iso),
+    )
+    gastos_count = cur_f.fetchone()[0] or 0
+    con_f.close()
+
+    return (pagos_count + ventas_count + gastos_count) > 0
+
+
+def _hay_datos_reporte_mensual(periodo=None):
+    inicio, periodo_str = _month_bounds(periodo)
+    if periodo is None:
+        today = date.today().replace(day=1) - timedelta(days=1)
+        inicio, periodo_str = _month_bounds(today)
+    ultimo = (inicio.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    inicio_iso = inicio.isoformat()
+    fin_iso = ultimo.isoformat()
+
+    con = conectar_socios()
+    cur = con.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM pagos
+        WHERE fecha BETWEEN ? AND ?
+    """,
+        (inicio_iso, fin_iso),
+    )
+    pagos_count = cur.fetchone()[0] or 0
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM socios
+        WHERE fecha_alta BETWEEN ? AND ?
+    """,
+        (inicio_iso, fin_iso),
+    )
+    socios_count = cur.fetchone()[0] or 0
+    con.close()
+
+    con_f = conectar_finanzas()
+    cur_f = con_f.cursor()
+    cur_f.execute(
+        """
+        SELECT COUNT(*)
+        FROM ventas_productos
+        WHERE fecha BETWEEN ? AND ?
+    """,
+        (inicio_iso, fin_iso),
+    )
+    ventas_count = cur_f.fetchone()[0] or 0
+    cur_f.execute(
+        """
+        SELECT COUNT(*)
+        FROM gastos
+        WHERE fecha BETWEEN ? AND ?
+    """,
+        (inicio_iso, fin_iso),
+    )
+    gastos_count = cur_f.fetchone()[0] or 0
+    con_f.close()
+
+    return (pagos_count + socios_count + ventas_count + gastos_count) > 0
+
+
 def _periodo_corte_semanal(hoy=None):
     ref = _coerce_date(hoy)
-    inicio_semana_actual = ref - timedelta(days=ref.weekday())
-    inicio_semana_objetivo = inicio_semana_actual - timedelta(days=7)
+    inicio_semana_objetivo = ref - timedelta(days=ref.weekday())
     fin_semana_objetivo = inicio_semana_objetivo + timedelta(days=6)
     periodo = f"{inicio_semana_objetivo.isocalendar()[0]}-W{inicio_semana_objetivo.isocalendar()[1]:02d}"
     return {
@@ -56,7 +157,7 @@ def _periodo_corte_semanal(hoy=None):
         "periodo": periodo,
         "fecha_inicio": inicio_semana_objetivo.isoformat(),
         "fecha_fin": fin_semana_objetivo.isoformat(),
-        "fecha_objetivo": inicio_semana_actual.isoformat(),
+        "fecha_objetivo": inicio_semana_objetivo.isoformat(),
         "titulo": "Corte semanal pendiente",
         "descripcion": f"Genera el corte de caja de la semana {inicio_semana_objetivo.isoformat()} al {fin_semana_objetivo.isoformat()}.",
     }
@@ -694,9 +795,9 @@ def obtener_recientes():
 def sincronizar_alertas_sistema(hoy=None):
     ref = _coerce_date(hoy)
     alertas = []
-    if ref.weekday() >= 0:
+    if ref.weekday() >= 0 and _hay_datos_corte_semanal(ref):
         alertas.append(_periodo_corte_semanal(ref))
-    if ref.day >= 1:
+    if ref.day >= 1 and _hay_datos_reporte_mensual(ref.replace(day=1) - timedelta(days=1)):
         alertas.append(_periodo_reporte_mensual(ref))
 
     con = conectar_socios()
@@ -736,12 +837,21 @@ def obtener_alertas_sistema_pendientes(hoy=None):
     con.close()
     resultado = []
     for alert_id, tipo, periodo, fecha_objetivo in rows:
+        if tipo == "corte_semanal":
+            año, semana = periodo.split("-W")
+            if not _hay_datos_corte_semanal(date.fromisocalendar(int(año), int(semana), 1)):
+                continue
+        elif tipo == "reporte_mensual":
+            if not _hay_datos_reporte_mensual(periodo):
+                continue
         base = definiciones.get(tipo)
         if base is None or base["periodo"] != periodo:
             if tipo == "corte_semanal":
                 año, semana = periodo.split("-W")
                 inicio = date.fromisocalendar(int(año), int(semana), 1)
                 base = {
+                    "fecha_inicio": inicio.isoformat(),
+                    "fecha_fin": (inicio + timedelta(days=6)).isoformat(),
                     "titulo": "Corte semanal pendiente",
                     "descripcion": f"Genera el corte de caja de la semana {inicio.isoformat()} al {(inicio + timedelta(days=6)).isoformat()}.",
                 }
@@ -749,6 +859,8 @@ def obtener_alertas_sistema_pendientes(hoy=None):
                 inicio, _ = _month_bounds(periodo)
                 ultimo = (inicio.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
                 base = {
+                    "fecha_inicio": inicio.isoformat(),
+                    "fecha_fin": ultimo.isoformat(),
                     "titulo": "Reporte mensual pendiente",
                     "descripcion": f"Genera el reporte mensual de {periodo}.",
                 }
@@ -758,6 +870,8 @@ def obtener_alertas_sistema_pendientes(hoy=None):
                 "tipo": tipo,
                 "periodo": periodo,
                 "fecha_objetivo": fecha_objetivo,
+                "fecha_inicio": base.get("fecha_inicio"),
+                "fecha_fin": base.get("fecha_fin"),
                 "titulo": base["titulo"],
                 "descripcion": base["descripcion"],
             }

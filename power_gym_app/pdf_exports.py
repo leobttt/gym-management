@@ -1,5 +1,5 @@
+import os
 from pathlib import Path
-from textwrap import wrap
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -16,16 +16,32 @@ BLANCO = "#F7F7F7"
 TEXTO_GRIS = "#A1A1AA"
 VERDE = "#3DDB84"
 
-FONT_REGULAR = "/System/Library/Fonts/Supplemental/Arial.ttf"
-FONT_BOLD = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+FONT_REGULAR_CANDIDATES = [
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+]
+
+FONT_BOLD_CANDIDATES = [
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+]
 
 
 def _font(size, bold=False):
-    path = FONT_BOLD if bold else FONT_REGULAR
-    try:
-        return ImageFont.truetype(path, size)
-    except OSError:
-        return ImageFont.load_default()
+    candidates = FONT_BOLD_CANDIDATES if bold else FONT_REGULAR_CANDIDATES
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except OSError:
+                pass
+    return ImageFont.load_default()
 
 
 def _new_page():
@@ -40,23 +56,6 @@ def _rounded(draw, box, fill, outline=None, width=1, radius=28):
 
 def _text(draw, pos, text, font, fill):
     draw.text(pos, text, font=font, fill=fill)
-
-
-def _line_wrap(draw, text, font, max_width):
-    words = text.split()
-    lines = []
-    current = ""
-    for word in words:
-        probe = f"{current} {word}".strip()
-        if draw.textbbox((0, 0), probe, font=font)[2] <= max_width:
-            current = probe
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    return lines or [text]
 
 
 def _header(draw, title, subtitle):

@@ -1,0 +1,4 @@
+customtkinter
+Pillow
+opencv-python
+pywin32; platform_system == "Windows"

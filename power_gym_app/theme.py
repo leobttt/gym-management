@@ -1,9 +1,8 @@
-from pathlib import Path
-
 import customtkinter as ctk
 from PIL import Image
+from power_gym_app.paths import get_resource_root
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = get_resource_root()
 ICONS_DIR = ROOT_DIR / "icons"
 
 ROJO = "#D61F2C"

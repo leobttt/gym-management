@@ -142,6 +142,26 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(reporte["gastos_total"], 1350.0)
 
     def test_alertas_sistema_generan_pendientes_y_se_pueden_atender(self):
+        socio_id = database.agregar_socio("Alerta Sistema", "5510000000", "", "2026-04-08")
+        con = database.conectar_socios()
+        cur = con.cursor()
+        cur.execute(
+            """
+            INSERT INTO pagos (socio_id, fecha, monto, metodo, concepto)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (socio_id, "2026-04-08", 350.0, "Efectivo", "Inscripción"),
+        )
+        cur.execute(
+            """
+            INSERT INTO pagos (socio_id, fecha, monto, metodo, concepto)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (socio_id, "2026-03-15", 350.0, "Efectivo", "Renovación"),
+        )
+        con.commit()
+        con.close()
+
         alertas = database.obtener_alertas_sistema_pendientes("2026-04-08")
 
         tipos = {alerta["tipo"] for alerta in alertas}
@@ -149,12 +169,18 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("reporte_mensual", tipos)
 
         corte = next(alerta for alerta in alertas if alerta["tipo"] == "corte_semanal")
+        self.assertEqual(corte["fecha_inicio"], "2026-04-06")
+        self.assertEqual(corte["fecha_fin"], "2026-04-12")
         database.marcar_alerta_sistema_atendida(corte["id"])
 
         restantes = database.obtener_alertas_sistema_pendientes("2026-04-08")
         tipos_restantes = {alerta["tipo"] for alerta in restantes}
         self.assertNotIn("corte_semanal", tipos_restantes)
         self.assertIn("reporte_mensual", tipos_restantes)
+
+    def test_alertas_sistema_no_aparecen_sin_datos(self):
+        alertas = database.obtener_alertas_sistema_pendientes("2026-04-08")
+        self.assertEqual(alertas, [])
 
     def test_socios_por_vencer_y_marcar_notificado_ocultan_alerta(self):
         socio_id = database.agregar_socio("Alerta Demo", "5533333333", "", "2026-04-01")
